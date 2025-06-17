@@ -1,0 +1,329 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>五子棋 · OpenAI 人机对战</title>
+    <style>
+        :root {
+            --cell-size: 32px;
+            --board-size: calc(var(--cell-size) * 8);
+            --line-color: #333;
+            --black-stone: #000;
+            --white-stone: #fff;
+            --board-bg: #debf83;
+        }
+
+        body {
+            font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen,
+                Ubuntu, Cantarell, "Open Sans", "Helvetica Neue", sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 1rem;
+            padding: 1.5rem;
+            background: #f8f8f8;
+        }
+
+        h1 {
+            font-size: 1.75rem;
+            margin: 0;
+        }
+
+        #board {
+            background: var(--board-bg);
+            width: var(--board-size);
+            height: var(--board-size);
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+            position: relative;
+            touch-action: none;
+        }
+
+        #overlay {
+            position: absolute;
+            inset: 0;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(3px);
+            background: rgba(255, 255, 255, 0.6);
+            flex-direction: column;
+            gap: 0.5rem;
+        }
+
+        #overlay.show {
+            display: flex;
+        }
+
+        #overlay h2 {
+            margin: 0;
+            font-size: 2rem;
+        }
+
+        button {
+            padding: 0.6rem 1rem;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: box-shadow 0.2s ease;
+        }
+
+        button:hover {
+            box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.2);
+        }
+
+        #keyInput {
+            width: 100%;
+            max-width: 420px;
+            padding: 0.5rem;
+            border: 1px solid #ccc;
+            border-radius: 8px;
+        }
+
+        #status {
+            min-height: 1.2rem;
+            color: #555;
+        }
+    </style>
+</head>
+
+<body>
+    <h1>五子棋 · OpenAI 人机对战</h1>
+    <canvas id="board" width="256" height="256"></canvas>
+    <div id="status">请点击棋盘开始，你执黑子先行。</div>
+
+    <template id="overlayTemplate">
+        <div id="overlay" class="overlay">
+            <h2 id="resultText"></h2>
+            <button id="restartBtn">再来一局</button>
+        </div>
+    </template>
+
+    <script>
+        /* ----------------- 基本参数与状态 ----------------- */
+        const SIZE = 8; // 棋盘大小
+        const CELL_SIZE = parseInt(
+            getComputedStyle(document.documentElement).getPropertyValue("--cell-size")
+        );
+
+        // 解析 CSS 变量得到真正的颜色值
+        const STYLES = getComputedStyle(document.documentElement);
+        const BLACK_COLOR = STYLES.getPropertyValue("--black-stone").trim() || "#000";
+        const WHITE_COLOR = STYLES.getPropertyValue("--white-stone").trim() || "#fff";
+
+        const board = Array.from({ length: SIZE }, () => Array(SIZE).fill(0));
+        let turn = 1; // 1: 玩家(黑); 2: AI(白)
+        let gameOver = false;
+
+        const canvas = document.getElementById("board");
+        const ctx = canvas.getContext("2d");
+        const statusEl = document.getElementById("status");
+        const keyInput = document.getElementById("keyInput");
+
+        /* ----------------- 画棋盘 ----------------- */
+        function drawBoard() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+            // 网格线
+            ctx.strokeStyle = getComputedStyle(document.documentElement).getPropertyValue(
+                "--line-color"
+            );
+            ctx.lineWidth = 1;
+            for (let i = 0; i < SIZE; i++) {
+                // 水平
+                ctx.beginPath();
+                ctx.moveTo(CELL_SIZE / 2, CELL_SIZE / 2 + i * CELL_SIZE);
+                ctx.lineTo(canvas.width - CELL_SIZE / 2, CELL_SIZE / 2 + i * CELL_SIZE);
+                ctx.stroke();
+                // 垂直
+                ctx.beginPath();
+                ctx.moveTo(CELL_SIZE / 2 + i * CELL_SIZE, CELL_SIZE / 2);
+                ctx.lineTo(CELL_SIZE / 2 + i * CELL_SIZE, canvas.height - CELL_SIZE / 2);
+                ctx.stroke();
+            }
+
+            // 星位 (3,3), (11,3), (7,7), (3,11), (11,11)
+            const stars = [
+                // [3, 3],
+                // [11, 3],
+                // [7, 7],
+                // [3, 11],
+                // [11, 11],
+            ];
+            for (const [x, y] of stars) {
+                drawStone(x, y, "#333", 4);
+            }
+
+            // 棋子
+            for (let y = 0; y < SIZE; y++) {
+                for (let x = 0; x < SIZE; x++) {
+                    if (board[y][x] === 1) drawStone(x, y, BLACK_COLOR);
+                    else if (board[y][x] === 2) drawStone(x, y, WHITE_COLOR);
+                }
+            }
+        }
+
+        function drawStone(x, y, color, radius = 13) {
+            ctx.beginPath();
+            ctx.arc(
+                CELL_SIZE / 2 + x * CELL_SIZE,
+                CELL_SIZE / 2 + y * CELL_SIZE,
+                radius,
+                0,
+                Math.PI * 2
+            );
+            ctx.fillStyle = color;
+            ctx.fill();
+            ctx.strokeStyle = "#00000044";
+            ctx.stroke();
+        }
+
+        /* ----------------- 胜负判断 ----------------- */
+        function checkWin(x, y) {
+            const player = board[y][x];
+            const dirs = [
+                [1, 0],
+                [0, 1],
+                [1, 1],
+                [1, -1],
+            ];
+            for (const [dx, dy] of dirs) {
+                let count = 1;
+                for (let dir = -1; dir <= 1; dir += 2) {
+                    let nx = x + dx * dir,
+                        ny = y + dy * dir;
+                    while (
+                        nx >= 0 &&
+                        nx < SIZE &&
+                        ny >= 0 &&
+                        ny < SIZE &&
+                        board[ny][nx] === player
+                    ) {
+                        count++;
+                        nx += dx * dir;
+                        ny += dy * dir;
+                    }
+                }
+                if (count >= 5) return true;
+            }
+            return false;
+        }
+
+        /* ----------------- 事件监听 ----------------- */
+        canvas.addEventListener("click", (e) => {
+            if (gameOver || turn !== 1) return;
+            const rect = canvas.getBoundingClientRect();
+            const x = Math.floor((e.clientX - rect.left) / CELL_SIZE);
+            const y = Math.floor((e.clientY - rect.top) / CELL_SIZE);
+            if (x < 0 || x >= SIZE || y < 0 || y >= SIZE) return;
+            if (board[y][x] !== 0) return;
+
+            makeMove(x, y, 1);
+            if (checkWin(x, y)) {
+                endGame("你赢了！");
+                return;
+            }
+            turn = 2;
+            statusEl.textContent = "AI 思考中…";
+            getAIMove([x,y]);
+        });
+
+        /* ----------------- 落子并重绘 ----------------- */
+        function makeMove(x, y, player) {
+            board[y][x] = player;
+            drawBoard();
+        }
+
+        // canvas click 事件中修改 getAIMove 调用
+        canvas.addEventListener("click", (e) => {
+            if (gameOver || turn !== 1) return;
+            const rect = canvas.getBoundingClientRect();
+            const x = Math.floor((e.clientX - rect.left) / CELL_SIZE);
+            const y = Math.floor((e.clientY - rect.top) / CELL_SIZE);
+            if (x < 0 || x >= SIZE || y < 0 || y >= SIZE) return;
+            if (board[y][x] !== 0) return;
+
+            // 先自己落子并绘制（也可以改为等待后端确认）
+            makeMove(x, y, 1);
+
+            getAIMove([x, y]); // 传坐标给后端
+        });
+
+        async function getAIMove(humanMove) {
+            try {
+                const res = await fetch("http://localhost:5000/move", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ move: humanMove })  // 传单步落子坐标
+                });
+
+                if (!res.ok) throw new Error(await res.text());
+                const data = await res.json();
+
+                if (data.gameover) {
+                    if (data.winner === 1) {
+                        endGame("你赢了！");
+                    } else if (data.winner === 2) {
+                        makeMove(...data.ai_move, 2);
+                        endGame("AI 胜利！");
+                    } else {
+                        endGame("平局！");
+                    }
+                    return;
+                }
+
+                // AI 落子
+                if (data.ai_move) {
+                    makeMove(...data.ai_move, 2);
+                }
+                turn = 1;
+                statusEl.textContent = "轮到你了。";
+            } catch (err) {
+                console.error(err);
+                alert("AI 调用出错: " + err.message);
+                turn = 1;
+                statusEl.textContent = "轮到你了(出错后暂无 AI)。";
+            }
+        }
+
+
+        /* ----------------- 结束并重置 ----------------- */
+        function endGame(text) {
+            gameOver = true;
+            statusEl.textContent = text;
+            showOverlay(text);
+        }
+
+        function resetGame() {
+            for (let y = 0; y < SIZE; y++) {
+                board[y].fill(0);
+            }
+            gameOver = false;
+            turn = 1;
+            statusEl.textContent = "请点击棋盘开始，你执黑子先行。";
+            drawBoard();
+        }
+
+        /* ----------------- 结果遮罩层 ----------------- */
+        function showOverlay(text) {
+            let overlay = document.getElementById("overlay");
+            if (!overlay) {
+                const tpl = document.getElementById("overlayTemplate").content.cloneNode(true);
+                document.body.appendChild(tpl);
+                overlay = document.getElementById("overlay");
+                document.getElementById("restartBtn").addEventListener("click", () => {
+                    overlay.classList.remove("show");
+                    resetGame();
+                });
+            }
+            document.getElementById("resultText").textContent = text;
+            overlay.classList.add("show");
+        }
+
+        /* ----------------- 初始渲染 ----------------- */
+        drawBoard();
+    </script>
+</body>
+
+</html>
