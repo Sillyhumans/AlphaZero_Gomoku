@@ -7,7 +7,7 @@
     <title>五子棋 · OpenAI 人机对战</title>
     <style>
         :root {
-            --cell-size: 32px;
+            --cell-size: 64px;
             --board-size: calc(var(--cell-size) * 8);
             --line-color: #333;
             --black-stone: #000;
@@ -91,7 +91,7 @@
 
 <body>
     <h1>五子棋 · OpenAI 人机对战</h1>
-    <canvas id="board" width="256" height="256"></canvas>
+    <canvas id="board" width="512" height="512"></canvas>
     <div id="status">请点击棋盘开始，你执黑子先行。</div>
 
     <template id="overlayTemplate">
@@ -229,6 +229,19 @@
             getAIMove([x,y]);
         });
 
+        // index.html 只展示变动部分
+        function resetGame() {
+            fetch("http://localhost:5000/reset", { method: "POST" })   // 通知后端
+                .then(() => {
+                    for (let y = 0; y < SIZE; y++) board[y].fill(0);
+                    gameOver = false;
+                    turn = 1;
+                    statusEl.textContent = "请点击棋盘开始，你执黑子先行。";
+                    drawBoard();
+                });
+        }
+
+
         /* ----------------- 落子并重绘 ----------------- */
         function makeMove(x, y, player) {
             board[y][x] = player;
@@ -236,19 +249,19 @@
         }
 
         // canvas click 事件中修改 getAIMove 调用
-        canvas.addEventListener("click", (e) => {
-            if (gameOver || turn !== 1) return;
-            const rect = canvas.getBoundingClientRect();
-            const x = Math.floor((e.clientX - rect.left) / CELL_SIZE);
-            const y = Math.floor((e.clientY - rect.top) / CELL_SIZE);
-            if (x < 0 || x >= SIZE || y < 0 || y >= SIZE) return;
-            if (board[y][x] !== 0) return;
+        // canvas.addEventListener("click", (e) => {
+        //     if (gameOver || turn !== 1) return;
+        //     const rect = canvas.getBoundingClientRect();
+        //     const x = Math.floor((e.clientX - rect.left) / CELL_SIZE);
+        //     const y = Math.floor((e.clientY - rect.top) / CELL_SIZE);
+        //     if (x < 0 || x >= SIZE || y < 0 || y >= SIZE) return;
+        //     if (board[y][x] !== 0) return;
 
-            // 先自己落子并绘制（也可以改为等待后端确认）
-            makeMove(x, y, 1);
+        //     // 先自己落子并绘制（也可以改为等待后端确认）
+        //     makeMove(x, y, 1);
 
-            getAIMove([x, y]); // 传坐标给后端
-        });
+        //     getAIMove([x, y]); // 传坐标给后端
+        // });
 
         async function getAIMove(humanMove) {
             try {
@@ -295,15 +308,15 @@
             showOverlay(text);
         }
 
-        function resetGame() {
-            for (let y = 0; y < SIZE; y++) {
-                board[y].fill(0);
-            }
-            gameOver = false;
-            turn = 1;
-            statusEl.textContent = "请点击棋盘开始，你执黑子先行。";
-            drawBoard();
-        }
+        // function resetGame() {
+        //     for (let y = 0; y < SIZE; y++) {
+        //         board[y].fill(0);
+        //     }
+        //     gameOver = false;
+        //     turn = 1;
+        //     statusEl.textContent = "请点击棋盘开始，你执黑子先行。";
+        //     drawBoard();
+        // }
 
         /* ----------------- 结果遮罩层 ----------------- */
         function showOverlay(text) {

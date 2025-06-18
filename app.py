@@ -22,6 +22,14 @@ board = Board(width=width, height=height, n_in_row=n)
 board.init_board(start_player=0)
 game = Game(board)
 
+@app.route('/reset', methods=['POST'])
+def reset():
+    global board, mcts_player
+    board.init_board(start_player=0)   # 清空棋盘
+    mcts_player.reset_player()         # 如果 MCTS 实现有 reset 接口，记得一起清
+    return jsonify({'status': 'ok'})
+
+
 @app.route('/')
 def index():
     return render_template('index.html')
@@ -47,14 +55,6 @@ def move():
     ai_location = board.move_to_location(ai_move)
 
     end, winner = board.game_end()
-
-    if end:
-        return jsonify({
-            'human_move': [int(x) for x in human_move],
-            'ai_move': None,
-            'winner': int(winner) if winner is not None else None,
-            'gameover': True
-        })
 
     return jsonify({
             'human_move': [int(x) for x in human_move],
